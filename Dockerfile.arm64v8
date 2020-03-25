@@ -1,0 +1,57 @@
+FROM golang:alpine as qemu
+
+#RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
+
+RUN apk add --no-cache curl
+
+WORKDIR /go
+RUN set -eux; \
+    \
+    curl -L https://github.com/balena-io/qemu/releases/download/v3.0.0%2Bresin/qemu-3.0.0+resin-aarch64.tar.gz | tar zxvf - -C . && mv qemu-3.0.0+resin-aarch64/qemu-aarch64-static .;
+
+
+FROM ubuntu AS builder
+
+ENV EXTRA_FLAGS='target_cpu="arm64"'
+
+WORKDIR /build
+RUN apt-get update \
+ && apt-get install -y git ninja-build python pkg-config libnss3-dev ccache  \
+        curl unzip \
+ && git clone --depth 1 https://github.com/klzgrad/naiveproxy.git \
+ && cd naiveproxy/src \
+ && ./get-clang.sh \
+ && ./build.sh
+
+
+# FROM arm64v8/alpine:latest
+
+# COPY --from=qemu /go/qemu-aarch64-static /usr/bin/
+# COPY --from=builder /build/naiveproxy/src/out/Release/naive /usr/local/bin/naive
+
+# #RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
+
+# RUN set -eux; \
+#     \
+#     runDeps=' \
+#         nss \
+#         libc6-compat \
+#     '; \
+#     \
+#     apk add --no-cache \
+#         $runDeps \
+#     ;
+
+FROM arm64v8/ubuntu:bionic
+
+COPY --from=qemu /go/qemu-aarch64-static /usr/bin/
+COPY --from=builder /build/naiveproxy/src/out/Release/naive /usr/local/bin/naive
+
+RUN set -eux; \
+    \
+    apt-get update; \
+    apt-get install --no-install-recommends -y libnss3; \
+    apt-get clean
+
+ENTRYPOINT [ "naive" ]
+CMD [ "--listen=http://0.0.0.0:1080", "--padding", "--log" ]
